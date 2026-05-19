@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Chat IA</title>
+
+<style>
+
+body{
+font-family: Arial;
+background:#0f172a;
+color:white;
+display:flex;
+flex-direction:column;
+align-items:center;
+margin-top:40px;
+}
+
+#chat{
+width:500px;
+height:400px;
+background:#1e293b;
+overflow:auto;
+padding:20px;
+border-radius:10px;
+}
+
+input{
+width:380px;
+padding:10px;
+border:none;
+border-radius:5px;
+}
+
+button{
+padding:10px;
+background:#22c55e;
+border:none;
+color:white;
+border-radius:5px;
+cursor:pointer;
+}
+
+.message{
+margin:10px 0;
+}
+
+</style>
+
+</head>
+<body>
+
+<h1>Chat IA</h1>
+
+<div id="chat"></div>
+
+<br>
+
+<input id="input" placeholder="Escribe un mensaje">
+<button onclick="send()">Enviar</button>
+
+<script>
+
+async function send(){
+
+let input=document.getElementById("input")
+let chat=document.getElementById("chat")
+
+let message=input.value
+
+chat.innerHTML+=`<div class="message"><b>Tu:</b> ${message}</div>`
+
+input.value=""
+
+let res=await fetch("/chat",{
+method:"POST",
+headers:{
+"Content-Type":"application/json"
+},
+body:JSON.stringify({message:message})
+})
+
+let data=await res.json()
+
+chat.innerHTML+=`<div class="message"><b>IA:</b> ${data.response}</div>`
+
+chat.scrollTop=chat.scrollHeight
+
+}
+
+</script>
+
+</body>
+</html>
