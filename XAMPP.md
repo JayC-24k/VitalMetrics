@@ -57,4 +57,8 @@ El archivo incluido configura Apache para reenviar `/vitalmetrics/` al servidor 
 
 Waitress debe permanecer ejecutándose para que Apache pueda servir la aplicación. Para la primera ejecución, Flask creará las tablas y el usuario administrador inicial configurado por `ADMIN_USERNAME`, `ADMIN_PASSWORD` y `ADMIN_EMAIL` (o los valores predeterminados del proyecto).
 
+## Autenticaci?n PHP
+
+El login y el registro usan `login.php`, `validar_login.php`, `registrar.php` y `logout.php` desde Apache, conectados a la misma base MySQL definida en `.env`. Apache excluye esos cuatro archivos del proxy Flask; las dem?s rutas contin?an en Waitress. El primer uso crea ?nicamente la tabla auxiliar `php_login_tickets` para pasar el inicio de sesi?n a Flask. Las tablas `users` y `evaluations` se conservan. Las claves nuevas usan el mismo formato PBKDF2 que Python, por lo que los usuarios existentes pueden seguir iniciando sesi?n.
+
 Si Apache no inicia, revisa `C:\xampp\apache\logs\error.log`; si Waitress no se conecta a MySQL, confirma el servicio, puerto, base de datos y credenciales de `.env`.

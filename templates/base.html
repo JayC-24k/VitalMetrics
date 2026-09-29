@@ -25,10 +25,10 @@
           <li class="nav-item"><a class="nav-link" href="{{ url_for('web.pagina_evaluacion') }}">Evaluación</a></li>
           {% if usuario.role == 'admin' %}<li class="nav-item"><a class="nav-link" href="{{ url_for('web.pagina_admin') }}">Administración</a></li>{% endif %}
           <li class="nav-item ms-lg-2"><span class="navbar-text me-2">Hola, {{ usuario.username }}</span></li>
-          <li class="nav-item"><form method="post" action="{{ url_for('web.logout') }}"><button class="btn btn-outline-primary btn-sm">Cerrar sesión</button></form></li>
+          <li class="nav-item"><a class="btn btn-outline-primary btn-sm" href="{{ request.script_root }}/logout.php">Cerrar sesión</a></li>
         {% else %}
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('web.login') }}">Iniciar sesión</a></li>
-          <li class="nav-item ms-lg-2"><a class="btn btn-primary btn-sm px-3" href="{{ url_for('web.signup') }}">Crear cuenta</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ request.script_root }}/login.php">Iniciar sesión</a></li>
+          <li class="nav-item ms-lg-2"><a class="btn btn-primary btn-sm px-3" href="{{ request.script_root }}/registrar.php">Crear cuenta</a></li>
         {% endif %}
       </ul>
     </div>

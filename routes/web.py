@@ -1,6 +1,10 @@
+import hashlib
+from urllib.parse import urlencode
+
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
-from auth import guardar_evaluacion, login_usuario, registrar_usuario
+from auth import guardar_evaluacion, login_usuario
 from controllers.admin_controller import (borrar_evaluacion, borrar_usuario, crear_usuario_admin, editar_evaluacion, editar_usuario, obtener_dashboard, obtener_evaluaciones, obtener_usuarios)
+from models.db import conectar
 from models.user_model import obtener_usuario
 from services.risk_service import calcular_riesgo_integral, clasificar_imc
 
@@ -26,20 +30,9 @@ def inicio():
     return render_template("home.html", usuario=usuario_actual())
 
 
-@web.route("/signup", methods=["GET", "POST"])
+@web.route("/signup")
 def signup():
-    if request.method == "POST":
-        resultado = registrar_usuario(
-            username=request.form.get("username"),
-            email=request.form.get("email"),
-            password=request.form.get("password"),
-        )
-        if resultado.get("success"):
-            session.update(user_id=resultado["user_id"], username=resultado["username"], role=resultado["role"])
-            flash("Tu cuenta quedó creada.", "success")
-            return redirect(url_for("web.inicio"))
-        flash(resultado.get("message", "No se pudo crear la cuenta."), "danger")
-    return render_template("auth.html", modo="registro", usuario=usuario_actual())
+    return redirect(f"{request.script_root}/registrar.php")
 
 
 @web.route("/logout", methods=["POST"])
@@ -47,6 +40,46 @@ def logout():
     session.clear()
     flash("Sesión cerrada.", "info")
     return redirect(url_for("web.inicio"))
+
+
+@web.route("/auth/php-session", methods=["POST"])
+def php_session():
+    ticket = request.form.get("ticket", "")
+    if len(ticket) != 64:
+        return redirect(url_for("web.login"))
+
+    token_hash = hashlib.sha256(ticket.encode("ascii", errors="ignore")).hexdigest()
+    with conectar() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_id, redirect_to FROM php_login_tickets "
+            "WHERE token_hash = ? AND expires_at > CURRENT_TIMESTAMP",
+            (token_hash,),
+        )
+        ticket_row = cursor.fetchone()
+        if not ticket_row:
+            return redirect(url_for("web.login"))
+        cursor.execute(
+            "DELETE FROM php_login_tickets "
+            "WHERE token_hash = ? AND expires_at > CURRENT_TIMESTAMP",
+            (token_hash,),
+        )
+        if cursor.rowcount != 1:
+            conn.rollback()
+            return redirect(url_for("web.login"))
+        conn.commit()
+
+    usuario = obtener_usuario(ticket_row["user_id"])
+    if not usuario:
+        return redirect(url_for("web.login"))
+
+    destino = ticket_row["redirect_to"] or url_for("web.inicio")
+    base = request.script_root.rstrip("/")
+    if not destino.startswith("/") or destino.startswith("//") or (base and destino != base and not destino.startswith(base + "/")):
+        destino = url_for("web.inicio")
+    session.clear()
+    session.update(user_id=usuario["id"], username=usuario["username"], role=usuario["role"])
+    return redirect(destino)
 
 
 @web.route("/evaluacion", methods=["GET", "POST"])
@@ -214,7 +247,11 @@ def login():
     if request.method == "GET":
         if usuario_actual():
             return redirect(url_for("web.inicio"))
-        return render_template("auth.html", modo="login", usuario=None)
+        destino = f"{request.script_root}/login.php"
+        siguiente = request.args.get("next", "")
+        if siguiente.startswith("/") and not siguiente.startswith("//"):
+            destino += "?" + urlencode({"next": siguiente})
+        return redirect(destino)
     if request.is_json:
         data = request.get_json(silent=True) or {}
     else:
@@ -224,13 +261,5 @@ def login():
         password=(request.form.get("password") if not request.is_json else data.get("password")),
     )
     if not request.is_json:
-        if resultado.get("success"):
-            session.update(user_id=resultado["user_id"], username=resultado["username"], role=resultado["role"])
-            flash(f"Bienvenido, {resultado['username']}.", "success")
-            destino = request.args.get("next", "")
-            if not destino.startswith("/") or destino.startswith("//"):
-                destino = url_for("web.inicio")
-            return redirect(destino)
-        flash(resultado.get("message", "No se pudo iniciar sesión."), "danger")
-        return render_template("auth.html", modo="login", usuario=usuario_actual())
+        return redirect(f"{request.script_root}/login.php")
     return jsonify(resultado), 200 if resultado["success"] else 401
