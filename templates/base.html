@@ -8,27 +8,27 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
-<body data-chat-url="{{ url_for('chat') }}">
+<body data-chat-url="{{ url_for('api.chat') }}">
 <nav class="navbar navbar-expand-lg sticky-top vm-navbar">
   <div class="container">
-    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('inicio') }}">
+    <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('web.inicio') }}">
       <img src="{{ url_for('static', filename='assets/fotopanda5.png') }}" alt="" width="44" height="44">
       <span><span class="brand-vital">Vital</span><span class="brand-metrics">Metrics</span></span>
     </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Abrir navegación"><span class="navbar-toggler-icon"></span></button>
     <div class="collapse navbar-collapse" id="mainNav">
       <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('inicio') }}">Inicio</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('inicio') }}#beneficios">Beneficios</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('inicio') }}#contacto">Contacto</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('web.inicio') }}">Inicio</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('web.inicio') }}#beneficios">Beneficios</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('web.inicio') }}#contacto">Contacto</a></li>
         {% if usuario %}
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('pagina_evaluacion') }}">Evaluación</a></li>
-          {% if usuario.role == 'admin' %}<li class="nav-item"><a class="nav-link" href="{{ url_for('pagina_admin') }}">Administración</a></li>{% endif %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('web.pagina_evaluacion') }}">Evaluación</a></li>
+          {% if usuario.role == 'admin' %}<li class="nav-item"><a class="nav-link" href="{{ url_for('web.pagina_admin') }}">Administración</a></li>{% endif %}
           <li class="nav-item ms-lg-2"><span class="navbar-text me-2">Hola, {{ usuario.username }}</span></li>
-          <li class="nav-item"><form method="post" action="{{ url_for('logout') }}"><button class="btn btn-outline-primary btn-sm">Cerrar sesión</button></form></li>
+          <li class="nav-item"><form method="post" action="{{ url_for('web.logout') }}"><button class="btn btn-outline-primary btn-sm">Cerrar sesión</button></form></li>
         {% else %}
-          <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Iniciar sesión</a></li>
-          <li class="nav-item ms-lg-2"><a class="btn btn-primary btn-sm px-3" href="{{ url_for('signup') }}">Crear cuenta</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('web.login') }}">Iniciar sesión</a></li>
+          <li class="nav-item ms-lg-2"><a class="btn btn-primary btn-sm px-3" href="{{ url_for('web.signup') }}">Crear cuenta</a></li>
         {% endif %}
       </ul>
     </div>

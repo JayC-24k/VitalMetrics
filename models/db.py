@@ -2,26 +2,13 @@ import os
 import sqlite3
 from pathlib import Path
 
+from config import load_local_env
 
+load_local_env()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = PROJECT_ROOT / "usuarios.db"
 
 
-def _load_local_env():
-    env_file = PROJECT_ROOT / ".env"
-    if not env_file.exists():
-        return
-    for line in env_file.read_text(encoding="utf-8-sig").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key, value = key.strip(), value.strip().strip('"').strip("'")
-        if key and value and key not in os.environ:
-            os.environ[key] = value
-
-
-_load_local_env()
 DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").strip().lower()
 
 
