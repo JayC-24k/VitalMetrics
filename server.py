@@ -4,7 +4,8 @@ import urllib.error
 import urllib.request
 from functools import wraps
 
-from flask import Flask, jsonify, request
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from auth import crear_tabla, guardar_evaluacion, login_usuario, registrar_usuario
 from controllers.admin_controller import (
@@ -18,10 +19,217 @@ from controllers.admin_controller import (
     obtener_usuarios,
 )
 from services.chat_scope import es_mensaje_vitalmetrics, respuesta_fuera_de_tema
+from models.user_model import obtener_usuario
+from services.risk_service import calcular_riesgo_integral, clasificar_imc
 
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
+app.secret_key = os.getenv("SECRET_KEY") or os.urandom(32)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+app.context_processor(lambda: {"now_year": __import__("datetime").datetime.now().year})
 crear_tabla()
+
+
+def usuario_actual():
+    user_id = session.get("user_id")
+    return obtener_usuario(user_id) if user_id else None
+
+
+def requiere_sesion_admin():
+    if not session.get("user_id"):
+        flash("Inicia sesión para continuar.", "warning")
+        return redirect(url_for("login"))
+    if session.get("role") != "admin":
+        flash("Esta sección requiere una cuenta administradora.", "danger")
+        return redirect(url_for("inicio"))
+    return None
+
+
+@app.route("/")
+def inicio():
+    return render_template("home.html", usuario=usuario_actual())
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        resultado = registrar_usuario(
+            username=request.form.get("username"),
+            email=request.form.get("email"),
+            password=request.form.get("password"),
+        )
+        if resultado.get("success"):
+            session.update(user_id=resultado["user_id"], username=resultado["username"], role=resultado["role"])
+            flash("Tu cuenta quedó creada.", "success")
+            return redirect(url_for("inicio"))
+        flash(resultado.get("message", "No se pudo crear la cuenta."), "danger")
+    return render_template("auth.html", modo="registro", usuario=usuario_actual())
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    flash("Sesión cerrada.", "info")
+    return redirect(url_for("inicio"))
+
+
+@app.route("/evaluacion", methods=["GET", "POST"])
+def pagina_evaluacion():
+    usuario = usuario_actual()
+    if not usuario:
+        flash("Inicia sesión para completar y guardar tu evaluación.", "warning")
+        return redirect(url_for("login", next=url_for("pagina_evaluacion")))
+    resultado = None
+    if request.method == "POST":
+        try:
+            def requerido(nombre):
+                valor = (request.form.get(nombre) or "").strip()
+                if not valor:
+                    raise ValueError(f"Completa el campo {nombre.replace('_', ' ')}.")
+                return valor
+
+            edad = int(requerido("edad"))
+            genero = requerido("genero")
+            municipio = requerido("municipio")
+            altura = float(requerido("altura_cm").replace(",", "."))
+            if altura <= 3:
+                altura *= 100
+            peso = float(requerido("peso_kg").replace(",", "."))
+            estrato = int(requerido("estrato"))
+            actividad = requerido("actividad")
+            minutos = int(requerido("actividad_minutos"))
+            alimentacion = requerido("calidad_alimentacion")
+            comidas = int(requerido("comidas_dia"))
+            bebidas = requerido("bebidas_azucaradas")
+            sueno = float(requerido("horas_sueno").replace(",", "."))
+            pantalla = float(requerido("horas_pantalla").replace(",", "."))
+            antecedentes = requerido("antecedentes_familiares")
+            espacios = requerido("acceso_espacios")
+            if not 1 <= edad <= 120 or not 30 <= altura <= 250 or not 1 <= peso <= 400:
+                raise ValueError("Verifica edad, altura y peso.")
+            if not 1 <= estrato <= 6 or not 0 <= minutos <= 10080 or not 1 <= comidas <= 6:
+                raise ValueError("Verifica estrato, actividad y comidas al día.")
+            if not 0 <= sueno <= 24 or not 0 <= pantalla <= 24:
+                raise ValueError("Las horas deben estar entre 0 y 24.")
+            imc, nivel = clasificar_imc(peso, altura)
+            puntaje, riesgo = calcular_riesgo_integral(
+                imc, estrato, minutos, alimentacion, bebidas, sueno, pantalla, antecedentes, espacios
+            )
+            resultado = guardar_evaluacion(
+                usuario["id"], edad, altura, peso, estrato, actividad, imc, nivel, riesgo,
+                genero=genero, municipio=municipio, actividad_minutos=minutos,
+                calidad_alimentacion=alimentacion, comidas_dia=comidas,
+                bebidas_azucaradas=bebidas, horas_sueno=sueno, horas_pantalla=pantalla,
+                antecedentes_familiares=antecedentes, acceso_espacios=espacios,
+                riesgo_puntaje=puntaje,
+            )
+            if resultado.get("success"):
+                resultado.update(imc=round(imc, 1), nivel=nivel, riesgo=riesgo, puntaje=puntaje)
+        except (ValueError, TypeError):
+            flash("Revisa los datos: todos los campos deben ser válidos.", "danger")
+    return render_template("evaluation.html", usuario=usuario, resultado=resultado)
+
+
+@app.route("/admin")
+def pagina_admin():
+    rechazo = requiere_sesion_admin()
+    if rechazo:
+        return rechazo
+    return render_template(
+        "admin.html", usuario=usuario_actual(), dashboard=obtener_dashboard(),
+        usuarios=obtener_usuarios(), evaluaciones=obtener_evaluaciones(),
+    )
+
+
+@app.route("/admin/usuarios", methods=["POST"])
+def admin_crear_usuario_web():
+    rechazo = requiere_sesion_admin()
+    if rechazo:
+        return rechazo
+    resultado = crear_usuario_admin(request.form.get("username"), request.form.get("email"), request.form.get("password"), request.form.get("role", "user"))
+    flash(resultado.get("message", "Listo."), "success" if resultado.get("success") else "danger")
+    return redirect(url_for("pagina_admin") + "#usuarios")
+
+
+@app.route("/admin/usuarios/<int:user_id>/eliminar", methods=["POST"])
+def admin_eliminar_usuario_web(user_id):
+    rechazo = requiere_sesion_admin()
+    if rechazo:
+        return rechazo
+    resultado = borrar_usuario(user_id, session.get("user_id"))
+    flash(resultado.get("message", "Listo."), "success" if resultado.get("success") else "danger")
+    return redirect(url_for("pagina_admin") + "#usuarios")
+
+
+@app.route("/admin/usuarios/<int:user_id>/editar", methods=["POST"])
+def admin_editar_usuario_web(user_id):
+    rechazo = requiere_sesion_admin()
+    if rechazo:
+        return rechazo
+    rol = request.form.get("role", "user")
+    if user_id == session.get("user_id") and rol != "admin":
+        flash("No puedes quitarte el rol de administrador durante esta sesión.", "danger")
+        return redirect(url_for("pagina_admin") + "#usuarios")
+    resultado = editar_usuario(
+        user_id, request.form.get("username"), request.form.get("email"), rol,
+        request.form.get("password") or None,
+    )
+    flash(resultado.get("message", "Listo."), "success" if resultado.get("success") else "danger")
+    return redirect(url_for("pagina_admin") + "#usuarios")
+
+
+@app.route("/admin/evaluaciones/<int:evaluation_id>/eliminar", methods=["POST"])
+def admin_eliminar_evaluacion_web(evaluation_id):
+    rechazo = requiere_sesion_admin()
+    if rechazo:
+        return rechazo
+    resultado = borrar_evaluacion(evaluation_id)
+    flash(resultado.get("message", "Listo."), "success" if resultado.get("success") else "danger")
+    return redirect(url_for("pagina_admin") + "#evaluaciones")
+
+
+@app.route("/admin/evaluaciones/<int:evaluation_id>/editar", methods=["POST"])
+def admin_editar_evaluacion_web(evaluation_id):
+    rechazo = requiere_sesion_admin()
+    if rechazo:
+        return rechazo
+    try:
+        altura = float(request.form.get("altura_cm", "").replace(",", "."))
+        peso = float(request.form.get("peso_kg", "").replace(",", "."))
+        estrato = int(request.form.get("estrato", ""))
+        minutos = int(request.form.get("actividad_minutos", ""))
+        alimentacion = request.form.get("calidad_alimentacion", "")
+        bebidas = request.form.get("bebidas_azucaradas", "")
+        sueno = float(request.form.get("horas_sueno", "").replace(",", "."))
+        pantalla = float(request.form.get("horas_pantalla", "").replace(",", "."))
+        antecedentes = request.form.get("antecedentes_familiares", "")
+        espacios = request.form.get("acceso_espacios", "")
+        edad = int(request.form.get("edad", ""))
+        comidas = int(request.form.get("comidas_dia", ""))
+        if not 1 <= edad <= 120 or not 30 <= altura <= 250 or not 1 <= peso <= 400:
+            raise ValueError("Edad, altura o peso fuera de rango.")
+        if not 1 <= estrato <= 6 or not 0 <= minutos <= 10080 or not 1 <= comidas <= 6:
+            raise ValueError("Estrato, actividad o comidas fuera de rango.")
+        if not 0 <= sueno <= 24 or not 0 <= pantalla <= 24:
+            raise ValueError("Horas fuera de rango.")
+        imc, nivel = clasificar_imc(peso, altura)
+        puntaje, riesgo = calcular_riesgo_integral(
+            imc, estrato, minutos, alimentacion, bebidas, sueno, pantalla, antecedentes, espacios
+        )
+        resultado = editar_evaluacion(
+            evaluation_id, edad, altura, peso, estrato,
+            request.form.get("actividad", ""), imc, nivel, riesgo,
+            actividad_minutos=minutos, calidad_alimentacion=alimentacion,
+            comidas_dia=comidas, bebidas_azucaradas=bebidas,
+            horas_sueno=sueno, horas_pantalla=pantalla,
+            antecedentes_familiares=antecedentes, acceso_espacios=espacios,
+            riesgo_puntaje=puntaje,
+        )
+    except (ValueError, TypeError):
+        resultado = {"success": False, "message": "Revisa los campos numéricos de la evaluación."}
+    flash(resultado.get("message", "Listo."), "success" if resultado.get("success") else "danger")
+    return redirect(url_for("pagina_admin") + "#evaluaciones")
 
 
 def requiere_admin(func):
@@ -59,13 +267,12 @@ cargar_env_local()
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models"
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_FALLBACK_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
     "openai/gpt-oss-20b",
-    "groq/compound-mini",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b",
 ]
+GROQ_MODEL = os.getenv("GROQ_MODEL", GROQ_FALLBACK_MODELS[0])
 
 GROQ_HEADERS_BASE = {
     "User-Agent": "VitalMetrics/1.0",
@@ -192,12 +399,19 @@ def responder_con_groq(mensaje):
             "Falta configurar el servicio del chat en el servidor."
         )
 
-    modelos = []
+    modelos_disponibles = modelos_disponibles_groq(api_key)
     modelo_configurado = os.getenv("GROQ_MODEL", GROQ_MODEL)
-    modelos_api = modelos_disponibles_groq(api_key)
-    for model in [modelo_configurado, *modelos_api, *GROQ_FALLBACK_MODELS]:
-        if model and model not in modelos:
-            modelos.append(model)
+    candidatos = [modelo_configurado, *GROQ_FALLBACK_MODELS]
+    if modelos_disponibles:
+        modelos = []
+        for model in candidatos:
+            if model in modelos_disponibles and model not in modelos:
+                modelos.append(model)
+    else:
+        modelos = list(dict.fromkeys(model for model in candidatos if model))
+
+    if not modelos:
+        return "La clave de Groq no tiene acceso a un modelo de chat compatible."
 
     errores_permiso = []
     ultimo_error = ""
@@ -210,7 +424,21 @@ def responder_con_groq(mensaje):
 
         detalle = resultado.get("detail", "")
         ultimo_error = detalle
-        if resultado.get("status") == 403 and "1010" in detalle:
+        if resultado.get("status") == 403 and any(
+            codigo in detalle.lower()
+            for codigo in (
+                "1010",
+                "model_permission_blocked_project",
+                "not authorized to use",
+                "permission denied",
+            )
+        ):
+            errores_permiso.append(model)
+            continue
+        if resultado.get("status") == 400 and any(
+            codigo in detalle.lower()
+            for codigo in ("model_not_found", "model_decommissioned", "model is not available")
+        ):
             errores_permiso.append(model)
             continue
 
@@ -230,13 +458,30 @@ def register():
     return jsonify(resultado), 200 if resultado["success"] else 400
 
 
-@app.route("/login", methods=["POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    data = request.get_json(silent=True) or {}
+    if request.method == "GET":
+        if usuario_actual():
+            return redirect(url_for("inicio"))
+        return render_template("auth.html", modo="login", usuario=None)
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.form
     resultado = login_usuario(
-        username=data.get("username"),
-        password=data.get("password"),
+        username=(request.form.get("username") if not request.is_json else data.get("username")),
+        password=(request.form.get("password") if not request.is_json else data.get("password")),
     )
+    if not request.is_json:
+        if resultado.get("success"):
+            session.update(user_id=resultado["user_id"], username=resultado["username"], role=resultado["role"])
+            flash(f"Bienvenido, {resultado['username']}.", "success")
+            destino = request.args.get("next", "")
+            if not destino.startswith("/") or destino.startswith("//"):
+                destino = url_for("inicio")
+            return redirect(destino)
+        flash(resultado.get("message", "No se pudo iniciar sesión."), "danger")
+        return render_template("auth.html", modo="login", usuario=usuario_actual())
     return jsonify(resultado), 200 if resultado["success"] else 401
 
 

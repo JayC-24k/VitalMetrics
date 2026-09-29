@@ -1,9 +1,7 @@
 import hashlib
 import hmac
 import os
-import sqlite3
-
-from .db import conectar, inicializar_db
+from .db import conectar, es_integrity_error, inicializar_db
 
 
 HASH_ITERATIONS = 260_000
@@ -72,8 +70,10 @@ def crear_usuario(username, password, email=None, role="user"):
                 "username": username,
                 "role": role,
             }
-    except sqlite3.IntegrityError:
-        return {"success": False, "message": "Usuario ya existe"}
+    except Exception as exc:
+        if es_integrity_error(exc):
+            return {"success": False, "message": "Usuario ya existe"}
+        raise
 
 
 def asegurar_admin_inicial():
@@ -108,8 +108,9 @@ def asegurar_admin_inicial():
                 """,
                 (username, email, hash_password(password)),
             )
-        except sqlite3.IntegrityError:
-            pass
+        except Exception as exc:
+            if not es_integrity_error(exc):
+                raise
         conn.commit()
 
 
@@ -208,8 +209,10 @@ def actualizar_usuario(user_id, username, email=None, role="user", password=None
             if cursor.rowcount == 0:
                 return {"success": False, "message": "Usuario no encontrado"}
             return {"success": True, "message": "Usuario actualizado"}
-    except sqlite3.IntegrityError:
-        return {"success": False, "message": "Ese nombre de usuario ya existe"}
+    except Exception as exc:
+        if es_integrity_error(exc):
+            return {"success": False, "message": "Ese nombre de usuario ya existe"}
+        raise
 
 
 def eliminar_usuario(user_id):

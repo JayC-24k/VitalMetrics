@@ -1,3 +1,4 @@
-flet
 flask
 requests
+PyMySQL
+waitress
